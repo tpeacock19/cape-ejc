@@ -27,67 +27,12 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'ejc-completion-common)
+(require 'dash)
+(require 'ejc-sql)
+(require 'thingatpt)
+(require 'ejc-capf-util)
 
-(defvar ejc-sql-mode-keymap)
-
-(defun ejc-capf--bounds (thing)
-  "Return bounds of THING."
-  (or (bounds-of-thing-at-point thing) (cons (point) (point))))
-
-(defun ejc-capf--interactive (capf)
-  "Complete with CAPF."
-  (let ((completion-at-point-functions (list capf)))
-    (or (completion-at-point) (user-error "%s: No completions" capf))))
-
-(cl-defun ejc-capf--table-with-properties (table &key category (sort t) &allow-other-keys)
-  "Create completion TABLE with properties.
-CATEGORY is the optional completion category.
-SORT should be nil to disable sorting."
-  (if (or (not table) (and (not category) sort))
-      table
-    (let ((metadata `(metadata
-                      ,@(and category `((category . ,category)))
-                      ,@(and (not sort) '((display-sort-function . identity)
-                                          (cycle-sort-function . identity))))))
-      (lambda (str pred action)
-        (if (eq action 'metadata)
-            metadata
-          (complete-with-action action table str pred))))))
-
-(defun ejc-capf--input-valid-p (old-input new-input cmp)
-  "Return non-nil if the NEW-INPUT is valid in comparison to OLD-INPUT.
-The CMP argument determines how the new input is compared to the old input.
-- never: Never treat the input as valid.
-- prefix/nil: The old input is a prefix of the new input.
-- equal: The old input is equal to the new input.
-- substring: The old input is a substring of the new input."
-  ;; Treat input as not changed if it contains space to allow
-  ;; Orderless completion style filtering.
-  (or (string-match-p "\\s-" new-input)
-      (pcase-exhaustive cmp
-        ('never nil)
-        ((or 'prefix 'nil) (string-prefix-p old-input new-input))
-        ('equal (equal old-input new-input))
-        ('substring (string-match-p (regexp-quote old-input) new-input)))))
-
-(defun ejc-capf--cached-table (beg end fun valid)
-  "Create caching completion table.
-BEG and END are the input bounds.
-FUN is the function which computes the candidates.
-VALID is the input comparator, see `ejc-capf--input-valid-p'."
-  (let ((input 'init)
-        (beg (copy-marker beg))
-        (end (copy-marker end t))
-        (table nil))
-    (lambda (str pred action)
-      (let ((new-input (buffer-substring-no-properties beg end)))
-        (when (or (eq input 'init) (not (ejc-capf--input-valid-p input new-input valid)))
-          ;; NOTE: We have to make sure that the completion table is interruptible.
-          ;; An interruption should not happen between the setqs.
-          (setq table (funcall fun new-input)
-                input new-input)))
-      (complete-with-action action table str pred))))
+(autoload 'bounds-of-thing-at-point "thingatpt")
 
 (defvar ejc-capf--properties
   (list :annotation-function #'ejc-capf--annotation
@@ -184,7 +129,6 @@ Otherwise, if point is not inside a symbol, return an empty string."
     (unless (and (char-after) (memq (char-syntax (char-after)) '(?w ?_)))
       "")))
 
-;;;###autoload
 (defun ejc-capf (&optional interactive)
   "Complete with Ejc at point.
 If INTERACTIVE is nil the function acts like a capf."
@@ -202,15 +146,5 @@ If INTERACTIVE is nil the function acts like a capf."
         ,@ejc-capf--properties))))
 
 
-;;;###autoload
-(defun ejc-capf-dot-pressed ()
-  (interactive)
-  (insert ".")
-  (if ejc-complete-on-dot
-      (call-interactively 'ejc-capf)))
-
-(define-key ejc-sql-mode-keymap (kbd ".") 'ejc-capf-dot-pressed)
-
 (provide 'ejc-capf)
-
 ;;; ejc-capf.el ends here
